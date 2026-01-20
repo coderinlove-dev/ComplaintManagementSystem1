@@ -65,7 +65,7 @@
   const token = localStorage.getItem('token');
   if (!token) return;
   try {
-    const res = await fetch('http://localhost:5000/api/user/me', {
+    const res = await fetch('/api/user/me', {
       headers: { "Authorization": "Bearer " + token }
     });
     if (!res.ok) return;
@@ -83,7 +83,7 @@ setUsernameInSidebar();
 window.onload = function () {
   const token = localStorage.getItem('token');
   const tbody = document.querySelector('#complaintsTable tbody');
-  fetch('http://localhost:5000/api/complaints/unsolved', {
+  fetch('/api/complaints/unsolved', {
     headers: { "Authorization": "Bearer " + token }
   })
   .then(response => response.json())
@@ -158,3 +158,4 @@ function showComplaintDetails(subject, description) {
 </script>
 </body>
 </html>
+
