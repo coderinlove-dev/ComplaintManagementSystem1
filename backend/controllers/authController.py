@@ -1,3 +1,4 @@
+# controllers/authController.py
 import os
 import bcrypt
 import jwt
@@ -5,7 +6,10 @@ from flask import request, jsonify
 from datetime import datetime, timedelta
 from config.db import get_connection 
 
-JWT_SECRET = os.getenv("JWT_SECRET", "your_jwt_secret")
+# --- Ensure JWT_SECRET exists ---
+JWT_SECRET = os.getenv("JWT_SECRET")
+if not JWT_SECRET:
+    raise RuntimeError("❌ JWT_SECRET environment variable is missing! Set it in Railway variables.")
 
 # ========== REGISTER USER OR STAFF ==========
 def registerUser():
@@ -21,19 +25,22 @@ def registerUser():
         roll_number = data.get("roll_number")
         branch = data.get("branch")
 
+        if not (first_name and last_name and email and password and role):
+            return jsonify({"message": "Missing required fields"}), 400
+
         name = f"{first_name} {last_name}"
 
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
 
-        # Find role_id (case-insensitive)
+        # Find role_id
         cursor.execute("SELECT id FROM roles WHERE LOWER(name) = %s", (role.lower(),))
         role_row = cursor.fetchone()
         if not role_row:
             return jsonify({"message": "Invalid role specified."}), 400
         role_id = role_row["id"]
 
-        # Check duplicate email
+        # Check for duplicate email
         cursor.execute("SELECT * FROM users WHERE email = %s", (email,))
         if cursor.fetchone():
             return jsonify({"message": "Email already registered. Please log in."}), 409
@@ -41,10 +48,10 @@ def registerUser():
         # Hash password
         hashed_password = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-        # Staff needs approval, users auto-approved
+        # Staff requires admin approval, users auto-approved
         is_approved = False if role.lower() == "staff" else True
 
-        # Insert new user
+        # Insert user
         cursor.execute(
             """
             INSERT INTO users 
@@ -56,35 +63,35 @@ def registerUser():
         conn.commit()
         new_user_id = cursor.lastrowid
 
+        # Staff response
         if role.lower() == "staff":
             return jsonify({"message": "Staff registration submitted! Await admin approval."}), 201
 
-        elif role.lower() == "user":
-            # Generate JWT
-            token = jwt.encode(
-                {"id": new_user_id, "role": role, "exp": datetime.utcnow() + timedelta(days=1)},
-                JWT_SECRET,
-                algorithm="HS256"
-            )
-            user_profile = {
-                "id": new_user_id,
-                "email": email,
-                "role": role,
-                "first_name": first_name,
-                "last_name": last_name,
-                "roll_number": roll_number,
-                "branch": branch
-            }
-            return jsonify({
-                "message": "Registration successful!",
-                "token": token,
-                "user": user_profile
-            }), 201
+        # User response with JWT
+        token = jwt.encode(
+            {"id": new_user_id, "role": role, "exp": datetime.utcnow() + timedelta(days=1)},
+            JWT_SECRET,
+            algorithm="HS256"
+        )
 
-        else:
-            return jsonify({"message": "Invalid role specified."}), 400
+        user_profile = {
+            "id": new_user_id,
+            "email": email,
+            "role": role,
+            "first_name": first_name,
+            "last_name": last_name,
+            "roll_number": roll_number,
+            "branch": branch
+        }
+
+        return jsonify({
+            "message": "Registration successful!",
+            "token": token,
+            "user": user_profile
+        }), 201
 
     except Exception as e:
+        print("REGISTER USER ERROR:", e)  # Railway log
         return jsonify({"message": "Registration failed.", "error": str(e)}), 500
     finally:
         if cursor:
@@ -101,6 +108,9 @@ def loginUser():
         data = request.get_json()
         email = data.get("email")
         password = data.get("password")
+
+        if not (email and password):
+            return jsonify({"message": "Email and password are required."}), 400
 
         conn = get_connection()
         cursor = conn.cursor(dictionary=True)
@@ -119,18 +129,19 @@ def loginUser():
         if not user:
             return jsonify({"message": "No account with this email. Please register."}), 404
 
-        # 🚨 Check staff status
+        # Staff approval check
         if user["role"].lower() == "staff":
-            if user["staff_status"] == "Pending":
+            staff_status = user.get("staff_status", "Pending")
+            if staff_status == "Pending":
                 return jsonify({"message": "Staff account is pending admin approval."}), 403
-            elif user["staff_status"] == "Rejected":
+            elif staff_status == "Rejected":
                 return jsonify({"message": "Your staff account was rejected by admin."}), 403
 
         # Verify password
         if not bcrypt.checkpw(password.encode("utf-8"), user["password"].encode("utf-8")):
             return jsonify({"message": "Incorrect password."}), 401
 
-        # Generate Access & Refresh Tokens
+        # Generate access & refresh tokens
         access_token = jwt.encode(
             {"id": user["id"], "role": user["role"], "exp": datetime.utcnow() + timedelta(minutes=30)},
             JWT_SECRET,
@@ -154,11 +165,12 @@ def loginUser():
                 "last_name": user["last_name"],
                 "roll_number": user["roll_number"],
                 "branch": user["branch"],
-                "staff_status": user["staff_status"]  # include staff status in response
+                "staff_status": user.get("staff_status", "N/A")
             }
         }), 200
 
     except Exception as e:
+        print("LOGIN USER ERROR:", e)  # Railway log
         return jsonify({"message": "Login failed", "error": str(e)}), 500
     finally:
         if cursor:
