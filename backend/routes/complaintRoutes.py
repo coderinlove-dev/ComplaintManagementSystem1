@@ -1,7 +1,7 @@
 # routes/complaintRoutes.py
 
 from flask import Blueprint
-from controllers.complaint_controller import (
+from controllers.complaintController import (
     addComplaint,
     getUserUnsolvedComplaints,
     getUserSolvedComplaints
@@ -34,3 +34,4 @@ def unsolved_complaints():
 @authenticate_token
 def solved_complaints():
     return getUserSolvedComplaints()
+
